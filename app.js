@@ -1,23 +1,36 @@
-import { SUBJECTS, TRACKS, BANK, BANK_SIZE, makeExam } from './questions.js';
+import { SUBJECTS, TRACKS, BANK, BANK_SIZE } from './questions.js';
 
-const STORAGE_KEY = 'ipas-ai-exam-v1';
-const EXAM_KEY = 'ipas-ai-active-v1';
+const LEGACY_RECORD_KEY = 'ipas-ai-exam-v1';
+const LEGACY_EXAM_KEY = 'ipas-ai-active-v1';
 const DURATION = 90 * 60 * 1000;
 const $ = selector => document.querySelector(selector);
 const safe = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const dateText = value => new Intl.DateTimeFormat('zh-TW', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
-const records = read(STORAGE_KEY, []);
-let active = read(EXAM_KEY, null);
+let records = [];
+let active = null;
 let view = 'home';
 let current = 0;
 let selectedRecord = null;
 let filterPerson = null;
 let filterTrack = 'all';
+let saving = false;
+let finishing = false;
+let lastFinishAttempt = 0;
 
-function read(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
-function persist(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { toast('無法儲存到此瀏覽器，請確認儲存空間與隱私設定。'); return false; } }
+async function api(path, options={}) {
+  const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...options.headers}});
+  const data=await response.json();
+  if (!response.ok) { const error=new Error(data.message || '伺服器請求失敗'); error.status=response.status; error.data=data; throw error; }
+  return data;
+}
+const payload = value => JSON.stringify(value);
+function requestError(error) { toast(error instanceof TypeError ? '無法連線到伺服器，請確認服務仍在運作。' : error.message); }
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 3500); }
-function setView(next) { view = next; document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === next)); render(); window.scrollTo({top:0,behavior:'instant'}); }
+function setView(next) {
+  view = next; document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === next));
+  render(); window.scrollTo({top:0,behavior:'instant'});
+  if (['home','history','insights'].includes(next)) api('/api/records').then(latest=>{records=latest;if (view===next) render();}).catch(requestError);
+}
 function title(name, crumb) { $('#pageTitle').textContent = name; $('#breadcrumb').textContent = crumb; }
 function personKey(record) { return JSON.stringify([record.name, record.code || '']); }
 function people() { return [...new Map(records.map(record => [personKey(record), {key:personKey(record),name:record.name,code:record.code}])).values()].sort((a,b) => a.name.localeCompare(b.name,'zh-Hant')); }
@@ -28,7 +41,7 @@ function topWeaknesses(list, limit = 5) {
   const tally = new Map();
   for (const record of list) for (const item of record.items) {
     const key = `${item.subject} / ${item.topic}`;
-    const entry = tally.get(key) || {label:key,wrong:0,total:0};
+    const entry = tally.get(key) || {label:`${SUBJECTS[item.subject]?.name || item.subject} / ${item.topic}`,wrong:0,total:0};
     entry.total++; if (item.answer !== item.correct) entry.wrong++;
     tally.set(key,entry);
   }
@@ -49,7 +62,7 @@ function renderHome() {
   const last = recentRecords(1)[0];
   $('#content').innerHTML = `${active ? `<div class="notice" style="margin-top:0">${safe(active.name)} 有一場尚未完成的 ${safe(TRACKS[active.track].name)}。<button class="text-button" data-view="exam">繼續作答 →</button></div>`:''}<section class="hero"><div class="hero-content"><span class="hero-label">IPAS AI APPLICATION PLANNER</span><h2>每一次練習，<br>都離目標更近一步。</h2><p>依官方評鑑範圍設計原創題庫。選擇初級或中級方向，完成 50 題模擬考，追蹤自己的進步與弱點。</p></div><div class="hero-art" aria-hidden="true">✦</div></section>
     <div class="grid-stats">${stat('題庫總量',BANK_SIZE+' 題','涵蓋 5 個考科')}${stat('已完成測驗',records.length+' 次','持續累積練習紀錄')}${stat('平均成績',averages(records)+' 分','所有考生的模擬考平均')}${stat('最近一次成績',last ? last.score+' 分':'—','每場滿分 100 分')}</div>
-    <div class="section-head"><div><h2>選擇模擬考</h2><p>每場 50 題、90 分鐘；題目與選項順序會重新隨機安排。</p></div></div>
+    <div class="section-head"><div><h2>選擇模擬考</h2><p>每場 50 題、90 分鐘；題目與選項順序會重新隨機安排。</p></div><button class="secondary-button" data-view="resume">跨裝置續考</button></div>
     <div class="track-grid">${Object.entries(TRACKS).map(([key,track],index) => `<article class="track-card"><div class="track-top"><span class="track-icon ${['blue','teal','purple'][index]}">${['◎','▥','◈'][index]}</span><span class="tag">${track.badge}</span></div><h3>${track.name}</h3><p>${track.subjects.map(subject => SUBJECTS[subject].name).join(' ＋ ')}</p><div class="track-meta"><span>◷ 90 分鐘</span><span>▦ 50 題</span><span>◎ 單選題</span></div><button class="primary-button" data-start="${key}">開始測驗　→</button></article>`).join('')}</div>
     <div class="below-grid"><section><div class="section-head"><div><h2>最近測驗</h2><p>回顧過去作答成果</p></div><button class="text-button" data-view="history">查看全部 →</button></div><div class="card">${historyTable(recentRecords())}</div></section><section><div class="section-head"><div><h2>常錯主題</h2><p>從錯誤率較高的主題開始複習</p></div></div><div class="card">${weaknessBars(records)}</div></section></div>`;
 }
@@ -57,14 +70,34 @@ function renderStart(track) {
   if (active) { toast('你有一場尚未完成的測驗，請先繼續或交卷。'); setView('exam'); return; }
   const info = TRACKS[track];
   title('建立模擬測驗','總覽 / 考前準備');
-  $('#content').innerHTML = `<div class="card" style="max-width:700px"><span class="eyebrow">${info.badge} / 50 QUESTIONS</span><h2 style="margin:10px 0 6px">${info.name}</h2><p class="muted">${info.subjects.map(subject => SUBJECTS[subject].name).join(' ＋ ')}</p><form id="startForm"><div class="form-grid" style="margin-top:25px"><label class="field">考生姓名<input id="nameInput" required maxlength="40" autocomplete="name" placeholder="請輸入姓名" /></label><label class="field">考生識別碼（選填）<input id="codeInput" maxlength="30" placeholder="同名考生可用學號或代碼區分" /></label></div><div class="notice">本模擬考固定 <strong>50 題、90 分鐘</strong>，每科各抽 25 題。交卷後顯示分數、錯誤主題及解析。初級官方單科考試為 75 分鐘；此處依你設定採 90 分鐘練習。姓名與紀錄會保存在此瀏覽器。</div><div class="actions"><button class="primary-button" type="submit">開始 90 分鐘測驗 →</button><button class="secondary-button" type="button" data-view="home">返回總覽</button></div></form></div>`;
-  $('#startForm').addEventListener('submit', event => {
+  $('#content').innerHTML = `<div class="card" style="max-width:700px"><span class="eyebrow">${info.badge} / 50 QUESTIONS</span><h2 style="margin:10px 0 6px">${info.name}</h2><p class="muted">${info.subjects.map(subject => SUBJECTS[subject].name).join(' ＋ ')}</p><form id="startForm"><div class="form-grid" style="margin-top:25px"><label class="field">考生姓名<input id="nameInput" required maxlength="40" autocomplete="name" placeholder="請輸入姓名" /></label><label class="field">考生識別碼（選填）<input id="codeInput" maxlength="30" placeholder="同名考生可用學號或代碼區分" /></label></div><div class="notice">本模擬考固定 <strong>50 題、90 分鐘</strong>，每科各抽 25 題。交卷後顯示分數、錯誤主題及解析。初級官方單科考試為 75 分鐘；此處依你設定採 90 分鐘練習。姓名與紀錄保存在伺服器的 SQLite 資料庫，其他裝置連到同一伺服器也能查看。</div><div class="actions"><button class="primary-button" type="submit">開始 90 分鐘測驗 →</button><button class="secondary-button" type="button" data-view="home">返回總覽</button></div></form></div>`;
+  $('#startForm').addEventListener('submit', async event => {
     event.preventDefault();
     const name = $('#nameInput').value.trim(); const code = $('#codeInput').value.trim();
     if (!name) { toast('請先輸入考生姓名。'); return; }
-    active = {id: crypto.randomUUID(), name, code, track, startedAt: Date.now(), questions: makeExam(track), answers:Array(50).fill(null)};
-    if (!persist(EXAM_KEY, active)) { active = null; return; }
-    current = 0; setView('exam');
+    const submit=$('#startForm button[type="submit"]'); submit.disabled=true;
+    try {
+      active=await api('/api/exams',{method:'POST',body:payload({name,code,track})});
+      current=0; setView('exam');
+    } catch (error) {
+      if (error.status===409 && error.data.active) {
+        active=error.data.active; current=0; setView('exam'); toast('已為這位考生接續未完成的測驗。');
+      } else {requestError(error); submit.disabled=false;}
+    }
+  });
+}
+function renderResume() {
+  title('繼續未完成測驗','總覽 / 跨裝置續考');
+  $('#content').innerHTML=`<div class="card" style="max-width:700px"><h2>找回進行中的測驗</h2><p class="muted">輸入開始測驗時使用的姓名與識別碼。資料須連到同一台伺服器。</p><form id="resumeForm"><div class="form-grid" style="margin:24px 0"><label class="field">考生姓名<input id="resumeName" required maxlength="40" autocomplete="name" /></label><label class="field">考生識別碼（未設定請留白）<input id="resumeCode" maxlength="30" /></label></div><div class="actions"><button class="primary-button" type="submit">尋找並繼續作答 →</button><button class="secondary-button" type="button" data-view="home">返回總覽</button></div></form></div>`;
+  $('#resumeForm').addEventListener('submit',async event=>{
+    event.preventDefault(); const name=$('#resumeName').value.trim(),code=$('#resumeCode').value.trim();
+    if (!name) return;
+    const button=$('#resumeForm button[type="submit"]');button.disabled=true;
+    try {
+      const exam=await api(`/api/active?name=${encodeURIComponent(name)}&code=${encodeURIComponent(code)}`);
+      if (!exam) {toast('找不到未完成的測驗。若已逾時，請到成績紀錄查看。');button.disabled=false;return;}
+      active=exam;current=0;setView('exam');
+    } catch(error) {requestError(error);button.disabled=false;}
   });
 }
 function remaining() { return active ? Math.max(0, DURATION - (Date.now() - active.startedAt)) : 0; }
@@ -74,7 +107,7 @@ function updateTimer() {
   const ms = remaining();
   const timer = view === 'exam' ? $('#timer') : null;
   if (timer) { timer.textContent = timerText(ms); timer.classList.toggle('urgent',ms < 5*60*1000); }
-  if (ms <= 0) finishExam(true);
+  if (ms <= 0 && Date.now()-lastFinishAttempt > 5000) finishExam();
 }
 function renderExam() {
   if (!active) { setView('home'); return; }
@@ -83,17 +116,17 @@ function renderExam() {
   const question = active.questions[current], answered = active.answers.filter(value => value !== null).length;
   $('#content').innerHTML = `<div class="exam-header"><div><strong>${safe(TRACKS[active.track].name)}</strong><div class="muted">考生：${safe(active.name)}${active.code ? ' · '+safe(active.code):''}　｜　已作答 ${answered} / 50</div></div><div class="timer" id="timer" aria-live="off">${timerText(remaining())}</div></div><div class="exam-layout"><section class="card question-card"><span class="question-meta">QUESTION ${String(current+1).padStart(2,'0')} / 50 · ${safe(SUBJECTS[question.subject].name)} · ${safe(question.topic)}</span><h2>${safe(question.prompt)}</h2><div class="choices">${question.options.map((option,index) => `<button class="choice ${active.answers[current] === index ? 'selected':''}" data-answer="${index}"><span class="choice-letter">${'ABCD'[index]}</span><span>${safe(option)}</span></button>`).join('')}</div><div class="exam-nav"><button class="secondary-button" data-prev ${current === 0 ? 'disabled':''}>← 上一題</button><div class="actions"><button class="secondary-button" data-clear ${active.answers[current] === null ? 'disabled':''}>清除答案</button>${current < 49 ? '<button class="primary-button" data-next>下一題 →</button>' : '<button class="primary-button" data-submit>完成交卷 →</button>'}</div></div></section><aside class="card"><strong style="font-size:13px">作答進度</strong><div class="progress-track"><span style="width:${answered*2}%"></span></div><div class="muted">已完成 ${answered} 題 · 尚未作答 ${50-answered} 題</div><div class="palette" aria-label="題目導覽">${active.questions.map((_,index) => `<button aria-label="第 ${index+1} 題${active.answers[index] !== null ? '，已作答':''}" class="${active.answers[index] !== null ? 'answered':''} ${current === index ? 'current':''}" data-jump="${index}">${index+1}</button>`).join('')}</div><button class="secondary-button" data-submit style="width:100%;margin-top:20px">提前交卷</button><button class="text-button" data-abandon style="width:100%;margin-top:9px">放棄這場測驗</button><p class="muted" style="line-height:1.6">時間到將自動交卷。離開頁面後重新開啟，仍可繼續未完成的測驗。</p></aside></div>`;
 }
-function finishExam(expired = false) {
-  if (!active) return;
-  const exam = active;
-  const items = exam.questions.map((question,index) => ({...question, answer:exam.answers[index]}));
-  const correct = items.filter(item => item.answer === item.correct).length;
-  const record = {id:exam.id,name:exam.name,code:exam.code,track:exam.track,startedAt:exam.startedAt,finishedAt:Date.now(),score:correct*2,correct,expired,items};
-  records.push(record);
-  if (!persist(STORAGE_KEY, records)) { records.pop(); return; }
-  localStorage.removeItem(EXAM_KEY); active = null;
-  selectedRecord = record.id; setView('result');
-  toast(expired ? '時間到，已自動交卷並保存成績。' : '交卷完成，成績已保存。');
+function acceptRecord(record) {
+  if (!records.some(item=>item.id===record.id)) records.push(record);
+  active=null; selectedRecord=record.id; setView('result');
+  toast(record.expired ? '時間到，已自動交卷並保存成績。' : '交卷完成，成績已保存。');
+}
+async function finishExam() {
+  if (!active || finishing || saving) return;
+  finishing=true;lastFinishAttempt=Date.now();
+  try { acceptRecord(await api(`/api/exams/${encodeURIComponent(active.id)}`,{method:'POST'})); }
+  catch(error) {requestError(error);}
+  finally {finishing=false;}
 }
 function renderResult() {
   const record = records.find(item => item.id === selectedRecord);
@@ -105,7 +138,7 @@ function renderResult() {
 function renderHistory() {
   title('每場努力，都有紀錄','總覽 / 成績紀錄');
   const list = [...records].sort((a,b) => b.finishedAt-a.finishedAt);
-  $('#content').innerHTML = `<div class="section-head"><div><h2>歷次測驗</h2><p>依完成時間排序，共 ${records.length} 場</p></div><button class="secondary-button" id="exportCsv" ${records.length ? '':'disabled'}>匯出 CSV</button></div><div class="card">${historyTable(list)}</div><p class="muted" style="margin-top:15px">資料保存在目前使用的瀏覽器。匯出 CSV 可備份成績；更換裝置或清除瀏覽器資料後，原紀錄不會自動同步。</p>`;
+  $('#content').innerHTML = `<div class="section-head"><div><h2>歷次測驗</h2><p>依完成時間排序，共 ${records.length} 場</p></div><button class="secondary-button" id="exportCsv" ${records.length ? '':'disabled'}>匯出 CSV</button></div><div class="card">${historyTable(list)}</div><p class="muted" style="margin-top:15px">成績保存在伺服器的 SQLite 資料庫。其他瀏覽器或電腦連到同一台伺服器，即可看到這些紀錄；CSV 可作為額外備份。</p>`;
   $('#exportCsv').addEventListener('click', exportCsv);
 }
 function lineChart(list) {
@@ -137,26 +170,57 @@ function exportCsv() {
   const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a'); link.href=url; link.download='ipas-ai-exam-results.csv'; link.click(); setTimeout(() => URL.revokeObjectURL(url),1000);
 }
 function render() {
-  if (view === 'home') renderHome(); else if (view === 'start') renderStart(window.pendingTrack || 'basic');
+  if (view === 'home') renderHome(); else if (view === 'start') renderStart(window.pendingTrack || 'basic'); else if (view === 'resume') renderResume();
   else if (view === 'exam') renderExam(); else if (view === 'result') renderResult();
   else if (view === 'history') renderHistory(); else if (view === 'insights') renderInsights(); else renderBank();
 }
-document.addEventListener('click',event => {
+document.addEventListener('click',async event => {
   const button=event.target.closest('button'); if (!button) return;
   if (button.dataset.start) {window.pendingTrack=button.dataset.start;setView('start');return;}
   if (button.dataset.view) {setView(button.dataset.view);return;}
   if (button.dataset.review) {selectedRecord=button.dataset.review;setView('result');return;}
-  if (button.dataset.delete) {if (!confirm('確定刪除這筆測驗紀錄嗎？刪除後無法復原。')) return;const index=records.findIndex(item => item.id === button.dataset.delete);if (index >= 0) {const removed=records.splice(index,1)[0];if (!persist(STORAGE_KEY,records)) {records.splice(index,0,removed);return;}selectedRecord=null;setView('history');toast('已刪除測驗紀錄。');}return;}
+  if (button.dataset.delete) {
+    if (!confirm('確定刪除這筆測驗紀錄嗎？刪除後無法復原。')) return;
+    try {await api(`/api/records/${encodeURIComponent(button.dataset.delete)}`,{method:'DELETE'});
+      records=records.filter(item=>item.id!==button.dataset.delete);selectedRecord=null;setView('history');toast('已刪除測驗紀錄。');}
+    catch(error) {requestError(error);} return;
+  }
   if (view !== 'exam' || !active) return;
-  if (button.dataset.answer !== undefined) {active.answers[current]=Number(button.dataset.answer);persist(EXAM_KEY,active);renderExam();return;}
-  if (button.hasAttribute('data-clear')) {active.answers[current]=null;persist(EXAM_KEY,active);renderExam();return;}
+  if (button.dataset.answer !== undefined || button.hasAttribute('data-clear')) {
+    if (saving || finishing) return;
+    const index=current,answer=button.hasAttribute('data-clear') ? null : Number(button.dataset.answer);
+    const prior=active.answers[index];active.answers[index]=answer;renderExam();saving=true;
+    try {await api(`/api/exams/${encodeURIComponent(active.id)}/answers`,{method:'PATCH',body:payload({index,answer})});}
+    catch(error) {
+      if (error.status===409 && error.data.record) acceptRecord(error.data.record);
+      else {if (active) {active.answers[index]=prior;renderExam();}requestError(error);}
+    } finally {saving=false;} return;
+  }
   if (button.hasAttribute('data-prev')) {current=Math.max(0,current-1);renderExam();return;}
   if (button.hasAttribute('data-next')) {current=Math.min(49,current+1);renderExam();return;}
   if (button.dataset.jump !== undefined) {current=Number(button.dataset.jump);renderExam();return;}
-  if (button.hasAttribute('data-submit')) {const missing=active.answers.filter(value => value === null).length; if (missing && !confirm(`還有 ${missing} 題未作答，確定交卷嗎？`)) return;finishExam();}
-  if (button.hasAttribute('data-abandon')) {if (!confirm('確定放棄這場測驗嗎？這場作答不會列入成績。')) return;localStorage.removeItem(EXAM_KEY);active=null;setView('home');toast('已放棄測驗。');}
+  if (button.hasAttribute('data-submit')) {const missing=active.answers.filter(value => value === null).length; if (missing && !confirm(`還有 ${missing} 題未作答，確定交卷嗎？`)) return;await finishExam();return;}
+  if (button.hasAttribute('data-abandon')) {
+    if (!confirm('確定放棄這場測驗嗎？這場作答不會列入成績。')) return;
+    try {await api(`/api/exams/${encodeURIComponent(active.id)}`,{method:'DELETE'});active=null;setView('home');toast('已放棄測驗。');}
+    catch(error) {requestError(error);} return;
+  }
 });
 $('#today').textContent=new Intl.DateTimeFormat('zh-TW',{year:'numeric',month:'long',day:'numeric'}).format(new Date());
 setInterval(updateTimer,1000);
-if (active) {view='exam';document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));}
-render();
+async function bootstrap() {
+  try {
+    let legacyRecords=[],legacyActive=null;
+    try {legacyRecords=JSON.parse(localStorage.getItem(LEGACY_RECORD_KEY)||'[]');legacyActive=JSON.parse(localStorage.getItem(LEGACY_EXAM_KEY)||'null');} catch {}
+    if (legacyRecords.length || legacyActive) {
+      const imported=await api('/api/import',{method:'POST',body:payload({records:legacyRecords,active:legacyActive})});
+      try {localStorage.removeItem(LEGACY_RECORD_KEY);localStorage.removeItem(LEGACY_EXAM_KEY);} catch {}
+      active=imported.active;
+      if (active) {view='exam';document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));}
+    }
+    records=await api('/api/records');render();
+  } catch(error) {
+    $('#content').innerHTML=`<div class="card"><h2>無法載入考試系統</h2><p>請確認 Node 伺服器正在運作，且 SQLite 資料庫可寫入。</p><p class="muted">${safe(error.message)}</p><button class="primary-button" onclick="location.reload()">重新載入</button></div>`;
+  }
+}
+bootstrap();

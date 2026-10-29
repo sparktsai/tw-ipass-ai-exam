@@ -11,6 +11,10 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 downloads/
 eggs/
 .eggs/
