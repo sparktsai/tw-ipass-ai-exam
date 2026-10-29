@@ -10,6 +10,8 @@
 npm start
 ```
 
+在 Bash / Git Bash / WSL 也可執行 `./start.sh`；預設監聽 `127.0.0.1:8765`，可用 `HOST`、`PORT`、`DB_PATH` 環境變數調整。
+
 接著開啟 <http://127.0.0.1:8765/>。此專案不需安裝套件，使用 Node.js 內建 SQLite。請使用 `npm start` 啟動，純靜態 HTTP 伺服器已無法保存成績。
 
 如需讓同一網路內的其他電腦使用，在伺服器上執行：
@@ -20,6 +22,14 @@ npm start
 ```
 
 其他電腦請開啟 `http://伺服器IP:8765/`。各裝置**必須連到同一台伺服器**，才會共用成績。若要變更連接埠，可設定 `PORT` 環境變數。
+
+## Docker 部署
+
+執行 `./rebuild.sh` 會建置映像並重新建立容器；也可直接執行 `docker compose -f docker-compose.yaml up -d --build --wait`。網站預設在 <http://127.0.0.1:1688/>，主機綁定位址與埠號分別由 `.env` 的 `HOST_BIND`、`HOST_PORT` 設定，容器內使用 8765 埠。
+
+SQLite 資料目錄由 `.env` 的 `DB_HOST_DIR` 設定；可先複製 `.env.example` 為 `.env`，預設範例使用 `D:/Docker/iPassAIExam`。重新建置或執行 `docker compose down` 不會移除該主機目錄，並請確保容器內的 `node` 使用者可寫入此目錄。
+
+預設只綁定主機的 `127.0.0.1`。需要區網連線時，可將 `HOST_BIND` 設為 `0.0.0.0`，其他電腦再用 `http://伺服器IP:1688/` 開啟。此系統尚未提供登入驗證，只應在可信任網路開放。
 
 ## 功能
 

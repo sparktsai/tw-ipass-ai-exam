@@ -1,0 +1,12 @@
+.git
+.gitignore
+.dockerignore
+data
+test
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+README.md
+start.sh
+rebuild.sh
+docker-compose.yaml

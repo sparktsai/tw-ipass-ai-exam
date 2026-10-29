@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${HOST_BIND:?HOST_BIND must be set in .env}:${HOST_PORT:?HOST_PORT must be set in .env}:8765"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8765"
+      DB_PATH: /data/ipas-ai.sqlite
+    volumes:
+      - type: bind
+        source: ${DB_HOST_DIR:?DB_HOST_DIR must be set in .env}
+        target: /data
+    restart: unless-stopped
