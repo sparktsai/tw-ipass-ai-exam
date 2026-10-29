@@ -25,11 +25,11 @@ npm start
 
 ## Docker 部署
 
-執行 `./rebuild.sh` 會建置映像並重新建立容器；也可直接執行 `docker compose -f docker-compose.yaml up -d --build --wait`。網站預設在 <http://127.0.0.1:1688/>，主機綁定位址與埠號分別由 `.env` 的 `HOST_BIND`、`HOST_PORT` 設定，容器內使用 8765 埠。
+執行 `./rebuild.sh` 會建置映像並重新建立容器；也可直接執行 `docker compose -f docker-compose.yaml up -d --build --wait`。主機綁定位址與埠號分別由 `.env` 的 `HOST_BIND`、`HOST_PORT` 設定，預設綁定所有網路介面的 1688 埠，容器內使用 8765 埠。
 
 SQLite 資料目錄由 `.env` 的 `DB_HOST_DIR` 設定；可先複製 `.env.example` 為 `.env`，預設範例使用 `D:/Docker/iPassAIExam`。重新建置或執行 `docker compose down` 不會移除該主機目錄，並請確保容器內的 `node` 使用者可寫入此目錄。
 
-預設只綁定主機的 `127.0.0.1`。需要區網連線時，可將 `HOST_BIND` 設為 `0.0.0.0`，其他電腦再用 `http://伺服器IP:1688/` 開啟。此系統尚未提供登入驗證，只應在可信任網路開放。
+`HOST_BIND=0.0.0.0` 允許非本機存取；本機可用 <http://127.0.0.1:1688/>，其他電腦請用 `http://伺服器IP:1688/` 開啟。此系統尚未提供登入驗證，只應在可信任網路開放，並確認防火牆允許 TCP 1688 埠。
 
 ## 功能
 
