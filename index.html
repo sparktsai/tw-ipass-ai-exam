@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#091a30" />
+  <meta name="description" content="iPAS AI 應用規劃師初級與中級模擬考：50 題、90 分鐘、錯題分析與成績曲線。" />
+  <title>iPAS AI 模擬考｜練習與成績追蹤</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#" aria-label="回到首頁"><span class="brand-mark">i<span>·</span></span><span><strong>iPAS AI</strong><small>模擬考練習系統</small></span></a>
+      <nav class="nav" aria-label="主要選單">
+        <button class="nav-item active" data-view="home"><span>⌂</span> 測驗總覽</button>
+        <button class="nav-item" data-view="history"><span>▤</span> 成績紀錄</button>
+        <button class="nav-item" data-view="insights"><span>◫</span> 學習分析</button>
+        <button class="nav-item" data-view="bank"><span>▦</span> 題庫範圍</button>
+      </nav>
+      <div class="sidebar-bottom"><div class="status-dot"></div><div><strong>為每一次進步留下紀錄</strong><small>資料儲存在此瀏覽器</small></div></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div><span class="eyebrow" id="breadcrumb">總覽 / 模擬測驗</span><h1 id="pageTitle">準備好，開始下一場練習</h1></div><div class="topbar-right"><span class="date-pill" id="today"></span><span class="avatar" aria-hidden="true">AI</span></div></header>
+      <div id="content"></div>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
